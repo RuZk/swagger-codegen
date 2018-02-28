@@ -1,18 +1,19 @@
 performance {
     authorizationHeader = "~MANUAL_ENTRY~"
-    rampUpSeconds = 60
-    rampDownSeconds = 60
-    durationSeconds = 360
+    rampUpSeconds = 0
+    rampDownSeconds = 0
+    durationSeconds = 5
     contentType = "application/json"
     acceptType = "application/json"
     rateMultiplier = 1
     instanceMultiplier = 1
+    apiBasePath = "http://localhost:3000"
     operationsPerSecond {
     {{#apiInfo}}
     {{#apis}}
     {{#operations}}
     {{#operation}}
-        {{operationId}} = 1
+        {{operationId}} = 5
     {{/operation}}
     {{/operations}}
     {{/apis}}

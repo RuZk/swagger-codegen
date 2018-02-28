@@ -1,5 +1,6 @@
 package io.swagger.codegen.languages;
 
+import com.google.common.base.CaseFormat;
 import io.swagger.codegen.*;
 import io.swagger.models.*;
 import io.swagger.models.parameters.*;
@@ -94,30 +95,14 @@ public class ScalaGatlingCodegen extends AbstractScalaCodegen implements Codegen
          * entire object tree available.  If the input file has a suffix of `.mustache
          * it will be processed by the template engine.  Otherwise, it will be copied
          */
-        supportingFiles.add(new SupportingFile("build.gradle",
-                "",
-                "build.gradle"));
-        supportingFiles.add(new SupportingFile("logback.xml",
-                confFolder,
-                "logback.xml"));
-        supportingFiles.add(new SupportingFile("default.conf.mustache",
-                confFolder,
-                "default.conf"));
+        supportingFiles.add(new SupportingFile("build.gradle","","build.gradle"));
+        supportingFiles.add(new SupportingFile("logback.xml", confFolder,"logback.xml"));
+/*        supportingFiles.add(new SupportingFile("gatling.conf", confFolder, "gatling.conf"));*/
         supportingFiles.add(new SupportingFile("default.conf.mustache",
                 confFolder,
                 "CI.conf"));
-        supportingFiles.add(new SupportingFile("default.conf.mustache",
-                confFolder,
-                "CD.conf"));
-        supportingFiles.add(new SupportingFile("default.conf.mustache",
-                confFolder,
-                "stress.conf"));
-        supportingFiles.add(new SupportingFile("default.conf.mustache",
-                confFolder,
-                "baseline.conf"));
-        supportingFiles.add(new SupportingFile("default.conf.mustache",
-                confFolder,
-                "longevity.conf"));
+        supportingFiles.add(new SupportingFile("default.conf.mustache", confFolder,"stress.conf"));
+        supportingFiles.add(new SupportingFile("default.conf.mustache", confFolder,"baseline.conf"));
 
 
         importMapping.remove("List");
@@ -205,7 +190,8 @@ public class ScalaGatlingCodegen extends AbstractScalaCodegen implements Codegen
             if (path.getOperations() == null) {
                 continue;
             }
-            for (Operation operation : path.getOperations()) {
+            for (Map.Entry<HttpMethod, Operation> operations : path.getOperationMap().entrySet()) {
+                Operation operation = operations.getValue();
                 if (!operation.getVendorExtensions().keySet().contains("x-gatling-path")) {
                     if (pathname.contains("{")) {
                         String gatlingPath = pathname.replaceAll("\\{", "\\$\\{");
@@ -214,6 +200,11 @@ public class ScalaGatlingCodegen extends AbstractScalaCodegen implements Codegen
                         operation.setVendorExtension("x-gatling-path", pathname);
                     }
                 }
+                String operationId = getOrGenerateOperationId(
+                        operation,
+                        "" + operation.getVendorExtensions().get("x-gatling-path"),
+                        operations.getKey().toString()
+                );
 
                 Set<Parameter> headerParameters = new HashSet<>();
                 Set<Parameter> formParameters = new HashSet<>();
@@ -249,27 +240,50 @@ public class ScalaGatlingCodegen extends AbstractScalaCodegen implements Codegen
                                     }
                                 }
                             }
-                            operation.setVendorExtension("x-gatling-body-feeder", operation.getOperationId() + "BodyFeeder");
+                            operation.setVendorExtension("x-gatling-body-feeder", operationId + "BodyFeeder");
                             operation.setVendorExtension("x-gatling-body-feeder-params", StringUtils.join(sessionBodyVars, ","));
                             try {
-                                FileUtils.writeStringToFile(new File(outputFolder + File.separator + dataFolder + File.separator + operation.getOperationId() + "-" + "bodyParams.csv"), StringUtils.join(bodyFeederParams, ","));
+                                String filename = outputFolder + File.separator + dataFolder + File.separator + operationId + "-" + "bodyParams.csv";
+                                File file = new File(filename);
+                                if (!file.exists()) {
+                                    FileUtils.writeStringToFile(file, StringUtils.join(bodyFeederParams, ","));
+                                }
                             } catch (IOException ioe) {
-                                LOGGER.error("Could not create feeder file for operationId" + operation.getOperationId(), ioe);
+                                LOGGER.error("Could not create feeder file for operationId" + operationId, ioe);
                             }
 
-                        } else if (model instanceof ArrayModel) {
+                        }/* else if (model instanceof ArrayModel) {
+                            String simpleRefName = ((RefProperty) ((ArrayModel) model).getItems()).getSimpleRef();
+                            for (Map.Entry<String, Model> modelEntry : swagger.getDefinitions().entrySet()) {
+                                if (simpleRefName.equalsIgnoreCase(modelEntry.getKey())) {
+                                    for (Map.Entry<String, Property> propertyEntry : modelEntry.getValue().getProperties().entrySet()) {
+
+                                        sessionBodyVars.add("\"${" + propertyEntry.getKey() + "}\"");
+                                    }
+                                }
+                            }
+
                             operation.setVendorExtension("x-gatling-body-object", "StringBody(\"[]\")");
-                        } else {
-                            operation.setVendorExtension("x-gatling-body-object", "StringBody(\"{}\")");
+                        } else */{
+                            try {
+                                String filename = outputFolder + File.separator + dataFolder + File.separator + operationId + "-" + "bodyParams.json";
+                                File file = new File(filename);
+                                if (!file.exists()) {
+                                    FileUtils.writeStringToFile(file, "[]");
+                                }
+                                operation.setVendorExtension("x-gatling-body-file", filename);
+                            } catch (IOException ioe) {
+                                LOGGER.error("Could not create feeder file for operationId" + operationId, ioe);
+                            }
                         }
 
                     }
                 }
 
-                prepareGatlingData(operation, headerParameters, "header");
-                prepareGatlingData(operation, formParameters, "form");
-                prepareGatlingData(operation, queryParameters, "query");
-                prepareGatlingData(operation, pathParameters, "path");
+                prepareGatlingData(operation, headerParameters, "header", operationId);
+                prepareGatlingData(operation, formParameters, "form", operationId);
+                prepareGatlingData(operation, queryParameters, "query", operationId);
+                prepareGatlingData(operation, pathParameters, "path", operationId);
             }
         }
 
@@ -282,7 +296,7 @@ public class ScalaGatlingCodegen extends AbstractScalaCodegen implements Codegen
      * @param parameters    Swagger Parameters
      * @param parameterType Swagger Parameter Type
      */
-    private void prepareGatlingData(Operation operation, Set<Parameter> parameters, String parameterType) {
+    private void prepareGatlingData(Operation operation, Set<Parameter> parameters, String parameterType, String operationId) {
         if (parameters.size() > 0) {
             List<String> parameterNames = new ArrayList<>();
             List<Object> vendorList = new ArrayList<>();
@@ -294,11 +308,15 @@ public class ScalaGatlingCodegen extends AbstractScalaCodegen implements Codegen
                 parameterNames.add(parameter.getName());
             }
             operation.setVendorExtension("x-gatling-" + parameterType.toLowerCase() + "-params", vendorList);
-            operation.setVendorExtension("x-gatling-" + parameterType.toLowerCase() + "-feeder", operation.getOperationId() + parameterType.toUpperCase() + "Feeder");
+            operation.setVendorExtension("x-gatling-" + parameterType.toLowerCase() + "-feeder", operationId + parameterType.toUpperCase() + "Feeder");
             try {
-                FileUtils.writeStringToFile(new File(outputFolder + File.separator + dataFolder + File.separator + operation.getOperationId() + "-" + parameterType.toLowerCase() + "Params.csv"), StringUtils.join(parameterNames, ","));
+                String fileName = outputFolder + File.separator + dataFolder + File.separator + operationId + "-" + parameterType.toLowerCase() + "Params.csv";
+                File file = new File(fileName);
+                if (!file.exists()) {
+                    FileUtils.writeStringToFile(file, StringUtils.join(parameterNames, ","));
+                }
             } catch (IOException ioe) {
-                LOGGER.error("Could not create feeder file for operationId" + operation.getOperationId(), ioe);
+                LOGGER.error("Could not create feeder file for operationId" + operationId, ioe);
             }
         }
     }

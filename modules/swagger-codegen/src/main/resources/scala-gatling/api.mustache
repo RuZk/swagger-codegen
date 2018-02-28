@@ -6,6 +6,7 @@ import com.typesafe.config.ConfigFactory
 import io.gatling.core.Predef._
 import io.gatling.http.Predef._
 import io.gatling.core.structure.PopulationBuilder
+import io.gatling.core.controller.inject.InjectionStep
 
 import java.io.File
 
@@ -27,6 +28,7 @@ class {{classname}}Simulation extends Simulation {
     val contentTypeHeader = config.getString("performance.contentType")
     val rateMultiplier = config.getDouble("performance.rateMultiplier")
     val instanceMultiplier = config.getDouble("performance.instanceMultiplier")
+    val apiBasePath = config.getString("performance.apiBasePath")
 
     // global assertion data
     val globalResponseTimeMinLTE = config.getInt("performance.global.assertions.responseTime.min.lte")
@@ -41,8 +43,8 @@ class {{classname}}Simulation extends Simulation {
     val globalResponseTimeSuccessfulRequestsPercentGTE = config.getDouble("performance.global.assertions.successfulRequests.percent.gte")
 
 // Setup http protocol configuration
-    val httpConf = http
-        .baseURL("{{basePath}}")
+    var httpConf = http
+        .baseURL(apiBasePath)
         .doNotTrackHeader("1")
         .acceptLanguageHeader("en-US,en;q=0.5")
         .acceptEncodingHeader("gzip, deflate")
@@ -52,7 +54,7 @@ class {{classname}}Simulation extends Simulation {
 
     // set authorization header if it has been modified from config
     if(!authentication.equals("~MANUAL_ENTRY")){
-        httpConf.authorizationHeader(authentication)
+    httpConf = httpConf.authorizationHeader(authentication)
     }
 
     // Setup all the operations per second for the test to ultimately be generated from configs
@@ -86,7 +88,6 @@ class {{classname}}Simulation extends Simulation {
 {{/operations}}
 
     // Setup all scenarios
-
 {{#operations}}
 {{#operation}}
     {{#description}}/* {{{description}}} */{{/description}}
@@ -117,16 +118,25 @@ class {{classname}}Simulation extends Simulation {
         {{#vendorExtensions.x-gatling-form-params}}
         .formParam("{{gatlingParamName}}","{{gatlingParamValue}}")
         {{/vendorExtensions.x-gatling-form-params}}
+        {{#vendorExtensions.x-gatling-body-file}}
+        .body(RawFileBody(userDataDirectory + File.separator + "{{operationId}}-bodyParams.json"))
+        {{/vendorExtensions.x-gatling-body-file}}
         {{#vendorExtensions.x-gatling-body-object}}
         .body(StringBody({{{vendorExtensions.x-gatling-body-object}}}{{#vendorExtensions.x-gatling-body-feeder-params}}({{{vendorExtensions.x-gatling-body-feeder-params}}}){{/vendorExtensions.x-gatling-body-feeder-params}}))
         {{/vendorExtensions.x-gatling-body-object}})
+    val scenariosList{{operationId}} = new mutable.MutableList[InjectionStep]
+    if (rampUpSeconds != 0) {
+        scenariosList{{operationId}} += rampUsersPerSec(1) to({{operationId}}PerSecond) during(rampUpSeconds)
+    }
+    if (durationSeconds != 0) {
+        scenariosList{{operationId}} += constantUsersPerSec({{operationId}}PerSecond) during(durationSeconds)
+    }
+    if (rampDownSeconds != 0) {
+        scenariosList{{operationId}} += rampUsersPerSec({{operationId}}PerSecond) to(1) during(rampDownSeconds)
+    }
 
     // Run scn{{operationId}} with warm up and reach a constant rate for entire duration
-    scenarioBuilders += scn{{operationId}}.inject(
-        rampUsersPerSec(1) to({{operationId}}PerSecond) during(rampUpSeconds),
-        constantUsersPerSec({{operationId}}PerSecond) during(durationSeconds),
-        rampUsersPerSec({{operationId}}PerSecond) to(1) during(rampDownSeconds)
-    )
+    scenarioBuilders += scn{{operationId}}.inject(scenariosList{{operationId}})
 
 {{/operation}}
 {{/operations}}
@@ -142,6 +152,7 @@ class {{classname}}Simulation extends Simulation {
         global.failedRequests.percent.lte(globalResponseTimeFailedRequestsPercentLTE),
         global.failedRequests.percent.gte(globalResponseTimeFailedRequestsPercentGTE),
         global.successfulRequests.percent.lte(globalResponseTimeSuccessfulRequestsPercentLTE),
-        global.successfulRequests.percent.gte(globalResponseTimeSuccessfulRequestsPercentGTE)
+        global.successfulRequests.percent.gte(globalResponseTimeSuccessfulRequestsPercentGTE),
+        global.failedRequests.count.is(0)
     )
 }
